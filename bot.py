@@ -8,6 +8,9 @@ from typing import Optional
 # Add aiohttp imports for health check server
 from aiohttp import web
 
+# Disable voice support before importing discord
+os.environ['DISABLE_DISCORD_VOICE'] = '1'
+
 # dotenv is optional on the server — fall back to real environment variables if missing
 try:
     from dotenv import load_dotenv
@@ -17,9 +20,6 @@ except Exception:
 
 import discord
 from discord.ext import commands
-
-# Disable voice features to avoid audioop dependency
-discord.VoiceClient.warn_nacl = False
 
 # Import database module
 import database_execution as dbmod
@@ -33,9 +33,12 @@ if not DISCORD_TOKEN or not WATCH_CHANNEL_ID or not STATS_CHANNEL_ID:
     print("ERROR: DISCORD_TOKEN, WATCH_CHANNEL_ID and STATS_CHANNEL_ID must be set in environment")
     raise SystemExit(1)
 
+# Set up intents without voice features
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
+intents.voice_states = False  # Explicitly disable voice states
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 def parse_embed_for_execution(embed: discord.Embed):
