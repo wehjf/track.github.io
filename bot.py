@@ -2,12 +2,37 @@ import os
 import asyncio
 import datetime
 import re
-from dotenv import load_dotenv
+import importlib
+from typing import Optional
+
+# dotenv is optional on the server — fall back to real environment variables if missing
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    # python-dotenv not installed or not needed; rely on actual env vars set in Render
+    pass
+
 import discord
 from discord.ext import commands
-import db as dbmod
 
-load_dotenv()
+# Try to import a DB helper module under several common names so the code works
+# whether the file is named db.py, dp.py, db_execution_manager.py, or execution_db_helper.py.
+db_module_names = ["db", "dp", "db_execution_manager", "execution_db_helper", "execution_tracker"]
+dbmod = None
+for name in db_module_names:
+    try:
+        dbmod = importlib.import_module(name)
+        print(f"Loaded DB module: {name}")
+        break
+    except ModuleNotFoundError:
+        continue
+
+if dbmod is None:
+    raise ModuleNotFoundError(
+        "No DB helper module found. Add db.py (or dp.py / db_execution_manager.py / execution_db_helper.py) "
+        "to the repo root or edit the import in your entrypoint to match your DB filename."
+    )
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 WATCH_CHANNEL_ID = int(os.getenv("WATCH_CHANNEL_ID") or 0)
@@ -15,13 +40,14 @@ STATS_CHANNEL_ID = int(os.getenv("STATS_CHANNEL_ID") or 0)
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID") or 0)
 
 if not DISCORD_TOKEN or not WATCH_CHANNEL_ID or not STATS_CHANNEL_ID:
-    print("ERROR: DISCORD_TOKEN, WATCH_CHANNEL_ID and STATS_CHANNEL_ID must be set")
+    print("ERROR: DISCORD_TOKEN, WATCH_CHANNEL_ID and STATS_CHANNEL_ID must be set in environment")
     raise SystemExit(1)
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+
 
 def parse_embed_for_execution(embed: discord.Embed):
     if not embed:
@@ -54,11 +80,14 @@ def parse_embed_for_execution(embed: discord.Embed):
             user_id = m_uid.group(1).strip()
     return username, user_id, exec_count
 
+
 @bot.event
 async def on_ready():
+    # initialize DB and start the stats poster
     await dbmod.init_db()
-    # start the periodic stats poster task
     bot.loop.create_task(stats_poster())
+    print(f"Bot ready. Logged in as: {bot.user}")
+
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -94,6 +123,7 @@ async def on_message(message: discord.Message):
                 print(f"Embed in message {message.id} didn't match expected fields; skipping.")
     await bot.process_commands(message)
 
+
 @bot.command(name="import_history")
 @commands.has_permissions(manage_messages=True)
 async def import_history(ctx, limit: int = 500):
@@ -116,6 +146,7 @@ async def import_history(ctx, limit: int = 500):
                         inserted += 1
     await ctx.send(f"Import complete. Processed {processed} messages, inserted {inserted} new executions.")
 
+
 @bot.command(name="stats")
 async def stats_command(ctx):
     minute_count = await dbmod.count_since(60)
@@ -124,7 +155,7 @@ async def stats_command(ctx):
     minute_unique = await dbmod.unique_users_since(60)
     hour_unique = await dbmod.unique_users_since(3600)
     day_unique = await dbmod.unique_users_since(86400)
-    now = datetime.datetime.utcnow()  # fixed: use datetime.datetime.utcnow()
+    now = datetime.datetime.utcnow()
     embed = discord.Embed(title="Execution Stats", color=0x3498db, timestamp=now)
     embed.add_field(name="Last minute — Executions", value=str(minute_count), inline=True)
     embed.add_field(name="Last minute — Unique users", value=str(minute_unique), inline=True)
@@ -137,13 +168,14 @@ async def stats_command(ctx):
     embed.set_footer(text="Execution Tracker")
     await ctx.send(embed=embed)
 
+
 async def stats_poster():
     await bot.wait_until_ready()
     while not bot.is_closed():
-        now = datetime.datetime.utcnow()  # fixed
+        now = datetime.datetime.utcnow()
         secs_to_next_minute = 60 - now.second
         await asyncio.sleep(secs_to_next_minute)
-        now = datetime.datetime.utcnow()  # fixed
+        now = datetime.datetime.utcnow()
         minute = now.minute
         hour = now.hour
         minute_count = await dbmod.count_since(60)
@@ -170,6 +202,7 @@ async def stats_poster():
                     embed.add_field(name="Executions", value=str(day_count), inline=True)
                     embed.add_field(name="Unique users", value=str(day_unique), inline=True)
                     await channel.send(embed=embed)
+
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
