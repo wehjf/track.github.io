@@ -1,1 +1,1 @@
-worker: python3 bot.py
+worker: cd /opt/render/project/src && python3 -m bot
