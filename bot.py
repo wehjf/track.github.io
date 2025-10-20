@@ -1,4 +1,14 @@
+# IMPORTANT: These must come before any discord imports
 import os
+import sys
+# Disable voice support before anything else
+os.environ['DISABLE_DISCORD_VOICE'] = '1'
+os.environ['DISABLE_VOICE'] = '1'
+
+# Patch sys.modules to prevent voice-related imports
+sys.modules['discord.voice_client'] = None
+sys.modules['discord.player'] = None
+
 import asyncio
 import datetime
 import re
@@ -8,9 +18,6 @@ from typing import Optional
 # Add aiohttp imports for health check server
 from aiohttp import web
 
-# Disable voice support before importing discord
-os.environ['DISABLE_DISCORD_VOICE'] = '1'
-
 # dotenv is optional on the server — fall back to real environment variables if missing
 try:
     from dotenv import load_dotenv
@@ -18,8 +25,13 @@ try:
 except Exception:
     pass
 
+# Now import discord after voice disabling
 import discord
 from discord.ext import commands
+
+# Ensure voice client is disabled
+if hasattr(discord, 'VoiceClient'):
+    discord.VoiceClient = None
 
 # Import database module
 import database_execution as dbmod
