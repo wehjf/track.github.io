@@ -5,34 +5,24 @@ import re
 import importlib
 from typing import Optional
 
+# Add aiohttp imports for health check server
+from aiohttp import web
+
 # dotenv is optional on the server — fall back to real environment variables if missing
 try:
-    from dotenv import load_dotenv  # type: ignore
+    from dotenv import load_dotenv
     load_dotenv()
 except Exception:
-    # python-dotenv not installed or not needed; rely on actual env vars set in Render
     pass
 
 import discord
 from discord.ext import commands
 
-# Try to import a DB helper module under several common names so the code works
-# whether the file is named db.py, dp.py, db_execution_manager.py, or execution_db_helper.py.
-db_module_names = ["db", "dp", "db_execution_manager", "execution_db_helper", "execution_tracker"]
-dbmod = None
-for name in db_module_names:
-    try:
-        dbmod = importlib.import_module(name)
-        print(f"Loaded DB module: {name}")
-        break
-    except ModuleNotFoundError:
-        continue
+# Disable voice features to avoid audioop dependency
+discord.VoiceClient.warn_nacl = False
 
-if dbmod is None:
-    raise ModuleNotFoundError(
-        "No DB helper module found. Add db.py (or dp.py / db_execution_manager.py / execution_db_helper.py) "
-        "to the repo root or edit the import in your entrypoint to match your DB filename."
-    )
+# Import database module
+import database_execution as dbmod
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 WATCH_CHANNEL_ID = int(os.getenv("WATCH_CHANNEL_ID") or 0)
@@ -47,7 +37,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 
 def parse_embed_for_execution(embed: discord.Embed):
     if not embed:
@@ -80,7 +69,6 @@ def parse_embed_for_execution(embed: discord.Embed):
             user_id = m_uid.group(1).strip()
     return username, user_id, exec_count
 
-
 @bot.event
 async def on_ready():
     # initialize DB and start the stats poster
@@ -88,10 +76,8 @@ async def on_ready():
     bot.loop.create_task(stats_poster())
     print(f"Bot ready. Logged in as: {bot.user}")
 
-
 @bot.event
 async def on_message(message: discord.Message):
-    # ignore messages from ourselves but still allow command processing
     if message.author and message.author.id == bot.user.id:
         await bot.process_commands(message)
         return
@@ -123,7 +109,6 @@ async def on_message(message: discord.Message):
                 print(f"Embed in message {message.id} didn't match expected fields; skipping.")
     await bot.process_commands(message)
 
-
 @bot.command(name="import_history")
 @commands.has_permissions(manage_messages=True)
 async def import_history(ctx, limit: int = 500):
@@ -146,7 +131,6 @@ async def import_history(ctx, limit: int = 500):
                         inserted += 1
     await ctx.send(f"Import complete. Processed {processed} messages, inserted {inserted} new executions.")
 
-
 @bot.command(name="stats")
 async def stats_command(ctx):
     minute_count = await dbmod.count_since(60)
@@ -167,7 +151,6 @@ async def stats_command(ctx):
     embed.add_field(name="Last day — Unique users", value=str(day_unique), inline=True)
     embed.set_footer(text="Execution Tracker")
     await ctx.send(embed=embed)
-
 
 async def stats_poster():
     await bot.wait_until_ready()
@@ -203,6 +186,24 @@ async def stats_poster():
                     embed.add_field(name="Unique users", value=str(day_unique), inline=True)
                     await channel.send(embed=embed)
 
+# Health check server setup
+async def _health(request):
+    return web.Response(text="OK")
+
+async def start_health_server():
+    app = web.Application()
+    app.router.add_get("/", _health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", "8080"))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Health server running on 0.0.0.0:{port}")
 
 if __name__ == "__main__":
+    # Start health check server
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_health_server())
+    
+    # Start the bot
     bot.run(DISCORD_TOKEN)
