@@ -57,16 +57,20 @@ def parse_embed_for_execution(embed: discord.Embed):
 @bot.event
 async def on_ready():
     await dbmod.init_db()
+    # start the periodic stats poster task
     bot.loop.create_task(stats_poster())
 
 @bot.event
 async def on_message(message: discord.Message):
+    # ignore messages from ourselves but still allow command processing
     if message.author and message.author.id == bot.user.id:
         await bot.process_commands(message)
         return
+
     if message.channel.id != WATCH_CHANNEL_ID:
         await bot.process_commands(message)
         return
+
     if message.embeds:
         for embed in message.embeds:
             username, user_id, exec_count = parse_embed_for_execution(embed)
@@ -120,7 +124,7 @@ async def stats_command(ctx):
     minute_unique = await dbmod.unique_users_since(60)
     hour_unique = await dbmod.unique_users_since(3600)
     day_unique = await dbmod.unique_users_since(86400)
-    now = datetime.datetime.datetime.utcnow()
+    now = datetime.datetime.utcnow()  # fixed: use datetime.datetime.utcnow()
     embed = discord.Embed(title="Execution Stats", color=0x3498db, timestamp=now)
     embed.add_field(name="Last minute — Executions", value=str(minute_count), inline=True)
     embed.add_field(name="Last minute — Unique users", value=str(minute_unique), inline=True)
@@ -136,10 +140,10 @@ async def stats_command(ctx):
 async def stats_poster():
     await bot.wait_until_ready()
     while not bot.is_closed():
-        now = datetime.datetime.datetime.utcnow()
+        now = datetime.datetime.utcnow()  # fixed
         secs_to_next_minute = 60 - now.second
         await asyncio.sleep(secs_to_next_minute)
-        now = datetime.datetime.datetime.utcnow()
+        now = datetime.datetime.utcnow()  # fixed
         minute = now.minute
         hour = now.hour
         minute_count = await dbmod.count_since(60)
